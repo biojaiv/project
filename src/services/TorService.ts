@@ -1,15 +1,11 @@
 import { TorControl } from 'node-tor-control';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { spawn } from 'child_process';
-import { join } from 'path';
-import { torBinary } from 'tor-binary';
 
 class TorService {
   private static instance: TorService;
-  private torProcess: any;
-  private torControl: TorControl;
   private isConnected: boolean = false;
   private proxyAgent: SocksProxyAgent | null = null;
+  private torControl: TorControl;
 
   private constructor() {
     this.torControl = new TorControl({
@@ -30,67 +26,34 @@ class TorService {
       // Check if Tor is already running
       const isRunning = await this.checkTorConnection();
       if (isRunning) {
-        console.log('Tor is already running');
+        console.log('Connected to existing Tor service');
         this.isConnected = true;
         return;
       }
 
-      // Start embedded Tor process
-      const torPath = torBinary.path;
-      this.torProcess = spawn(torPath, [
-        '--SocksPort', '9050',
-        '--ControlPort', '9051',
-        '--DataDirectory', join(process.cwd(), '.tor')
-      ]);
-
-      this.torProcess.stdout.on('data', (data: Buffer) => {
-        console.log('Tor:', data.toString());
-      });
-
-      this.torProcess.stderr.on('data', (data: Buffer) => {
-        console.error('Tor error:', data.toString());
-      });
-
-      // Wait for Tor to bootstrap
-      await this.waitForTorBootstrap();
-      
+      // Initialize SOCKS proxy agent
       this.proxyAgent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
-      this.isConnected = true;
       
-      console.log('Tor started successfully');
+      // Verify connection
+      const connected = await this.checkTorConnection();
+      if (!connected) {
+        throw new Error('Failed to connect to Tor SOCKS proxy');
+      }
+
+      this.isConnected = true;
+      console.log('Successfully connected to Tor network');
     } catch (error) {
-      console.error('Failed to start Tor:', error);
+      console.error('Failed to start Tor connection:', error);
       throw error;
     }
   }
 
-  private async waitForTorBootstrap(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Tor bootstrap timeout'));
-      }, 60000);
-
-      const checkBootstrap = async () => {
-        try {
-          const info = await this.torControl.getInfo('status/bootstrap-phase');
-          if (info.includes('PROGRESS=100')) {
-            clearTimeout(timeout);
-            resolve();
-          } else {
-            setTimeout(checkBootstrap, 1000);
-          }
-        } catch (error) {
-          clearTimeout(timeout);
-          reject(error);
-        }
-      };
-
-      checkBootstrap();
-    });
-  }
-
   async checkTorConnection(): Promise<boolean> {
     try {
+      if (!this.proxyAgent) {
+        this.proxyAgent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
+      }
+
       const response = await fetch('https://check.torproject.org/api/ip', {
         agent: this.proxyAgent
       });
@@ -110,11 +73,9 @@ class TorService {
   }
 
   async stop(): Promise<void> {
-    if (this.torProcess) {
-      this.torProcess.kill();
-      this.isConnected = false;
-      this.proxyAgent = null;
-    }
+    this.isConnected = false;
+    this.proxyAgent = null;
+    console.log('Tor connection stopped');
   }
 }
 
