@@ -62,7 +62,21 @@ Deno.serve(async (req) => {
     // Create Tor SOCKS proxy agent
     const torProxy = new SocksProxyAgent('socks5h://127.0.0.1:9050');
 
-    // Test connection through Tor
+    // Verify Tor connection first
+    try {
+      const torCheck = await fetch('https://check.torproject.org/api/ip', {
+        agent: torProxy,
+      });
+      const torData = await torCheck.json();
+      
+      if (!torData.IsTor) {
+        throw new Error('Not connected to Tor network');
+      }
+    } catch (error) {
+      throw new Error('Failed to verify Tor connection: ' + error.message);
+    }
+
+    // Test email connection through Tor
     const imapConfig = {
       user: email,
       password: password,
