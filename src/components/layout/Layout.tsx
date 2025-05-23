@@ -3,7 +3,7 @@ import Header from './Header';
 import Sidebar from './Sidebar';
 import MainView from './MainView';
 
-const Layout = () => {
+const Layout: React.FC = () => {
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Header />
