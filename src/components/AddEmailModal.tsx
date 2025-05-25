@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { XIcon, ShieldIcon, AlertTriangleIcon, CheckCircleIcon } from 'lucide-react';
 
 interface AddEmailModalProps {
@@ -17,12 +17,53 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'checking' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [securityWindow, setSecurityWindow] = useState<Window | null>(null);
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaUrl, setCaptchaUrl] = useState('');
+
+  useEffect(() => {
+    // Cleanup function to close security window when component unmounts
+    return () => {
+      if (securityWindow) {
+        securityWindow.close();
+      }
+    };
+  }, [securityWindow]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData(prev => ({
       ...prev,
       [e.target.name]: e.target.value
     }));
+  };
+
+  const handleCaptchaComplete = async (token: string) => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-email`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          ...formData,
+          captchaToken: token
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setVerificationStatus('success');
+        if (securityWindow) {
+          securityWindow.close();
+        }
+      } else {
+        throw new Error(data.message || 'Verification failed');
+      }
+    } catch (error) {
+      setVerificationStatus('error');
+      setErrorMessage(error.message || 'Failed to verify email');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,46 +81,38 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
         body: JSON.stringify(formData)
       });
 
-      // Check if response is ok before attempting to parse JSON
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server error:', errorText);
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      // Verify content type is JSON
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        throw new Error('Invalid response format from server');
-      }
-
       const data = await response.json();
 
-      if (!data.success) {
-        throw new Error(data.message || 'Verification failed');
-      }
-
-      if (data.requiresSecurityCheck) {
-        const secWindow = window.open(
-          data.securityCheckUrl,
-          'Security Verification',
-          'width=500,height=600'
+      if (data.requiresCaptcha) {
+        setCaptchaRequired(true);
+        setCaptchaUrl(data.captchaUrl);
+        
+        const captchaWindow = window.open(
+          data.captchaUrl,
+          'CAPTCHA Verification',
+          'width=400,height=600,top=100,left=100'
         );
-        setSecurityWindow(secWindow);
-
-        window.addEventListener('message', (event) => {
-          if (event.data.type === 'SECURITY_CHECK_COMPLETE') {
-            secWindow?.close();
-            setVerificationStatus('success');
-          }
-        });
-      } else {
+        
+        if (captchaWindow) {
+          setSecurityWindow(captchaWindow);
+          
+          // Listen for CAPTCHA completion
+          window.addEventListener('message', (event) => {
+            if (event.data.type === 'CAPTCHA_COMPLETE') {
+              handleCaptchaComplete(event.data.token);
+              captchaWindow.close();
+            }
+          });
+        }
+      } else if (data.success) {
         setVerificationStatus('success');
+      } else {
+        throw new Error(data.message || 'Verification failed');
       }
     } catch (error) {
       console.error('Verification failed:', error);
       setVerificationStatus('error');
-      setErrorMessage(error.message || 'Failed to verify email. Please try again.');
+      setErrorMessage(error.message || 'Failed to verify email');
     }
   };
 
@@ -182,6 +215,12 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
                 Connection verified successfully
               </div>
             )}
+
+            {captchaRequired && (
+              <div className="bg-blue-900/20 p-4 rounded-lg text-blue-400">
+                <p>Please complete the CAPTCHA verification in the popup window.</p>
+              </div>
+            )}
           </div>
           
           <div className="mt-6 flex justify-end gap-3">
@@ -195,7 +234,7 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
             <button
               type="submit"
               className="px-4 py-2 text-sm font-medium text-white bg-wine-600 rounded-md hover:bg-wine-700"
-              disabled={verificationStatus === 'checking'}
+              disabled={verificationStatus === 'checking' || captchaRequired}
             >
               Add Account
             </button>
