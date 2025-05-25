@@ -15,7 +15,11 @@ import { useEmail } from '../../context/EmailContext';
 import { mockFolders } from '../../data/mockData';
 import AddAccountModal from '../accounts/AddAccountModal';
 
-const Sidebar: React.FC = () => {
+interface SidebarProps {
+  onAddAccount: () => void;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ onAddAccount }) => {
   const { accounts } = useAccount();
   const { 
     selectedFolder, 
@@ -23,7 +27,6 @@ const Sidebar: React.FC = () => {
     selectedAccountId, 
     setSelectedAccountId 
   } = useEmail();
-  const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
   const getFolderIcon = (iconName: string) => {
@@ -56,7 +59,7 @@ const Sidebar: React.FC = () => {
     <aside className="w-64 h-full bg-gray-900 border-r border-wine-800 flex-shrink-0 overflow-y-auto transition-all duration-300 ease-in-out">
       <div className="p-4">
         <button 
-          onClick={() => setIsAddAccountModalOpen(true)}
+          onClick={onAddAccount}
           className="w-full bg-wine-600 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-wine-700 transition-colors"
         >
           <PlusIcon className="w-5 h-5" />
@@ -158,11 +161,6 @@ const Sidebar: React.FC = () => {
           <span>Settings</span>
         </button>
       </div>
-
-      <AddAccountModal 
-        isOpen={isAddAccountModalOpen}
-        onClose={() => setIsAddAccountModalOpen(false)}
-      />
     </aside>
   );
 };
