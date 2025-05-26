@@ -1,6 +1,4 @@
-import { ImapFlow } from 'imapflow';
-import nodemailer from 'nodemailer';
-import TorService from './TorService';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 
 interface EmailConfig {
   user: string;
@@ -10,14 +8,57 @@ interface EmailConfig {
   tls: boolean;
 }
 
+interface ProviderConfig {
+  host: string;
+  port: number;
+  tls: boolean;
+  requiresCaptcha?: boolean;
+  captchaUrl?: string;
+}
+
+const EMAIL_PROVIDERS: Record<string, ProviderConfig> = {
+  gmail: {
+    host: 'imap.gmail.com',
+    port: 993,
+    tls: true,
+    requiresCaptcha: true,
+    captchaUrl: 'https://accounts.google.com/v3/signin/challenge/pwd'
+  },
+  outlook: {
+    host: 'outlook.office365.com',
+    port: 993,
+    tls: true
+  },
+  yahoo: {
+    host: 'imap.mail.yahoo.com',
+    port: 993,
+    tls: true,
+    requiresCaptcha: true,
+    captchaUrl: 'https://login.yahoo.com/account/challenge/session-expired'
+  },
+  icloud: {
+    host: 'imap.mail.me.com',
+    port: 993,
+    tls: true
+  },
+  gmx: {
+    host: 'imap.gmx.net',
+    port: 993,
+    tls: true
+  },
+  webde: {
+    host: 'imap.web.de',
+    port: 993,
+    tls: true
+  }
+};
+
 class EmailService {
   private static instance: EmailService;
-  private connections: Map<string, ImapFlow> = new Map();
-  private torService: TorService;
+  private connections: Map<string, any> = new Map();
+  private captchaCallbacks: Map<string, (token: string) => void> = new Map();
 
-  private constructor() {
-    this.torService = TorService.getInstance();
-  }
+  private constructor() {}
 
   static getInstance(): EmailService {
     if (!EmailService.instance) {
@@ -26,85 +67,81 @@ class EmailService {
     return EmailService.instance;
   }
 
-  async connect(config: EmailConfig): Promise<boolean> {
+  async verifyConnection(email: string, password: string, provider: string): Promise<{ 
+    success: boolean; 
+    requiresCaptcha?: boolean; 
+    captchaUrl?: string;
+    message?: string;
+  }> {
+    const providerConfig = EMAIL_PROVIDERS[provider.toLowerCase()];
+    if (!providerConfig) {
+      return { 
+        success: false, 
+        message: 'Unsupported email provider' 
+      };
+    }
+
     try {
-      // Ensure Tor is running
-      if (!this.torService.isConnectedToTor()) {
-        await this.torService.start();
-      }
-
-      const proxyAgent = this.torService.getProxyAgent();
-      if (!proxyAgent) {
-        throw new Error('No Tor proxy available');
-      }
-
-      const client = new ImapFlow({
-        host: config.host,
-        port: config.port,
-        secure: config.tls,
-        auth: {
-          user: config.user,
-          pass: config.password
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-email`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
         },
-        proxy: proxyAgent
+        body: JSON.stringify({
+          email,
+          password,
+          provider,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls
+        })
       });
 
-      await client.connect();
-      this.connections.set(config.user, client);
-      
-      console.log(`Connected to email account: ${config.user}`);
-      return true;
+      const data = await response.json();
+
+      if (data.requiresCaptcha) {
+        return {
+          success: false,
+          requiresCaptcha: true,
+          captchaUrl: providerConfig.captchaUrl,
+          message: 'CAPTCHA verification required'
+        };
+      }
+
+      return {
+        success: data.success,
+        message: data.message
+      };
     } catch (error) {
-      console.error('Failed to connect to email:', error);
-      return false;
+      console.error('Email verification error:', error);
+      return {
+        success: false,
+        message: error.message || 'Failed to verify email connection'
+      };
     }
   }
 
-  async fetchEmails(email: string, folder: string = 'INBOX'): Promise<any[]> {
-    const client = this.connections.get(email);
-    if (!client) {
-      throw new Error('Not connected to email account');
+  async handleCaptchaCompletion(email: string, token: string): Promise<boolean> {
+    const callback = this.captchaCallbacks.get(email);
+    if (callback) {
+      callback(token);
+      this.captchaCallbacks.delete(email);
+      return true;
     }
-
-    const lock = await client.getMailboxLock(folder);
-    try {
-      const messages = await client.fetch('1:*', { envelope: true, source: true });
-      return Array.from(messages);
-    } finally {
-      lock.release();
-    }
-  }
-
-  async sendEmail(from: string, to: string, subject: string, body: string): Promise<void> {
-    const proxyAgent = this.torService.getProxyAgent();
-    if (!proxyAgent) {
-      throw new Error('No Tor proxy available');
-    }
-
-    const transport = nodemailer.createTransport({
-      proxy: proxyAgent.proxy.href,
-      secure: true,
-      // Add email provider specific settings
-    });
-
-    await transport.sendMail({
-      from,
-      to,
-      subject,
-      text: body
-    });
+    return false;
   }
 
   async disconnect(email: string): Promise<void> {
-    const client = this.connections.get(email);
-    if (client) {
-      await client.logout();
+    const connection = this.connections.get(email);
+    if (connection) {
+      await connection.logout();
       this.connections.delete(email);
     }
   }
 
   async disconnectAll(): Promise<void> {
-    for (const [email, client] of this.connections) {
+    for (const [email] of this.connections) {
       await this.disconnect(email);
     }
   }

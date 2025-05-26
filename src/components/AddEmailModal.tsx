@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { XIcon, ShieldIcon, AlertTriangleIcon, CheckCircleIcon } from 'lucide-react';
+import EmailService from '../services/EmailService';
 
 interface AddEmailModalProps {
   isOpen: boolean;
@@ -20,8 +21,9 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
   const [captchaRequired, setCaptchaRequired] = useState(false);
   const [captchaUrl, setCaptchaUrl] = useState('');
 
+  const emailService = EmailService.getInstance();
+
   useEffect(() => {
-    // Cleanup function to close security window when component unmounts
     return () => {
       if (securityWindow) {
         securityWindow.close();
@@ -38,31 +40,17 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
 
   const handleCaptchaComplete = async (token: string) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-email`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({
-          ...formData,
-          captchaToken: token
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
+      const success = await emailService.handleCaptchaCompletion(formData.email, token);
+      if (success) {
         setVerificationStatus('success');
+        setCaptchaRequired(false);
         if (securityWindow) {
           securityWindow.close();
         }
-      } else {
-        throw new Error(data.message || 'Verification failed');
       }
     } catch (error) {
       setVerificationStatus('error');
-      setErrorMessage(error.message || 'Failed to verify email');
+      setErrorMessage(error.message || 'Failed to verify CAPTCHA');
     }
   };
 
@@ -72,23 +60,18 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
     setErrorMessage('');
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-email`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify(formData)
-      });
+      const result = await emailService.verifyConnection(
+        formData.email,
+        formData.password,
+        formData.provider
+      );
 
-      const data = await response.json();
-
-      if (data.requiresCaptcha) {
+      if (result.requiresCaptcha && result.captchaUrl) {
         setCaptchaRequired(true);
-        setCaptchaUrl(data.captchaUrl);
+        setCaptchaUrl(result.captchaUrl);
         
         const captchaWindow = window.open(
-          data.captchaUrl,
+          result.captchaUrl,
           'CAPTCHA Verification',
           'width=400,height=600,top=100,left=100'
         );
@@ -96,7 +79,6 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
         if (captchaWindow) {
           setSecurityWindow(captchaWindow);
           
-          // Listen for CAPTCHA completion
           window.addEventListener('message', (event) => {
             if (event.data.type === 'CAPTCHA_COMPLETE') {
               handleCaptchaComplete(event.data.token);
@@ -104,10 +86,10 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
             }
           });
         }
-      } else if (data.success) {
+      } else if (result.success) {
         setVerificationStatus('success');
       } else {
-        throw new Error(data.message || 'Verification failed');
+        throw new Error(result.message || 'Verification failed');
       }
     } catch (error) {
       console.error('Verification failed:', error);
@@ -190,7 +172,8 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
                 <option value="outlook">Outlook</option>
                 <option value="yahoo">Yahoo</option>
                 <option value="icloud">iCloud</option>
-                <option value="other">Other</option>
+                <option value="gmx">GMX</option>
+                <option value="webde">Web.de</option>
               </select>
             </div>
 
