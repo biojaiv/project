@@ -8,14 +8,35 @@ import { useTor } from './context/TorContext';
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const { isConnected, connecting, connect } = useTor();
 
   useEffect(() => {
-    // Attempt to connect to Tor on app start
-    if (!isConnected && !connecting) {
-      connect();
-    }
+    const initializeApp = async () => {
+      try {
+        if (!isConnected && !connecting) {
+          await connect();
+        }
+      } catch (error) {
+        console.error('Failed to initialize Tor:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initializeApp();
   }, [isConnected, connecting, connect]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-wine-500 border-t-transparent mb-4"></div>
+          <p className="text-lg">Initializing secure connection...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
