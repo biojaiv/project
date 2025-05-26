@@ -14,6 +14,8 @@ interface ProviderConfig {
   tls: boolean;
   requiresCaptcha?: boolean;
   captchaUrl?: string;
+  specialInstructions?: string;
+  requiresBridge?: boolean;
 }
 
 const EMAIL_PROVIDERS: Record<string, ProviderConfig> = {
@@ -50,6 +52,13 @@ const EMAIL_PROVIDERS: Record<string, ProviderConfig> = {
     host: 'imap.web.de',
     port: 993,
     tls: true
+  },
+  protonmail: {
+    host: '127.0.0.1',
+    port: 1143,
+    tls: true,
+    requiresBridge: true,
+    specialInstructions: 'ProtonMail requires the ProtonMail Bridge application to be installed and running. Please install ProtonMail Bridge and try again.'
   }
 };
 
@@ -67,17 +76,43 @@ class EmailService {
     return EmailService.instance;
   }
 
+  private getProviderFromEmail(email: string): string {
+    const domain = email.split('@')[1].toLowerCase();
+    if (domain === 'gmail.com') return 'gmail';
+    if (domain === 'outlook.com' || domain === 'hotmail.com' || domain === 'live.com') return 'outlook';
+    if (domain === 'yahoo.com') return 'yahoo';
+    if (domain === 'icloud.com' || domain === 'me.com') return 'icloud';
+    if (domain === 'gmx.com' || domain === 'gmx.net') return 'gmx';
+    if (domain === 'web.de') return 'webde';
+    if (domain === 'proton.me' || domain === 'protonmail.com') return 'protonmail';
+    return 'other';
+  }
+
   async verifyConnection(email: string, password: string, provider: string): Promise<{ 
     success: boolean; 
     requiresCaptcha?: boolean; 
     captchaUrl?: string;
+    requiresBridge?: boolean;
+    specialInstructions?: string;
     message?: string;
   }> {
-    const providerConfig = EMAIL_PROVIDERS[provider.toLowerCase()];
+    const detectedProvider = this.getProviderFromEmail(email);
+    const providerConfig = EMAIL_PROVIDERS[detectedProvider] || EMAIL_PROVIDERS[provider.toLowerCase()];
+
     if (!providerConfig) {
       return { 
         success: false, 
         message: 'Unsupported email provider' 
+      };
+    }
+
+    // Handle ProtonMail specifically
+    if (providerConfig.requiresBridge) {
+      return {
+        success: false,
+        requiresBridge: true,
+        specialInstructions: providerConfig.specialInstructions,
+        message: 'This email provider requires additional setup'
       };
     }
 
@@ -91,7 +126,7 @@ class EmailService {
         body: JSON.stringify({
           email,
           password,
-          provider,
+          provider: detectedProvider || provider,
           host: providerConfig.host,
           port: providerConfig.port,
           tls: providerConfig.tls

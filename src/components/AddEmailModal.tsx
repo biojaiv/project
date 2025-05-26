@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { XIcon, ShieldIcon, AlertTriangleIcon, CheckCircleIcon } from 'lucide-react';
+import { XIcon, ShieldIcon, AlertTriangleIcon, CheckCircleIcon, DownloadIcon } from 'lucide-react';
 import EmailService from '../services/EmailService';
 
 interface AddEmailModalProps {
@@ -20,6 +20,8 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
   const [securityWindow, setSecurityWindow] = useState<Window | null>(null);
   const [captchaRequired, setCaptchaRequired] = useState(false);
   const [captchaUrl, setCaptchaUrl] = useState('');
+  const [requiresBridge, setRequiresBridge] = useState(false);
+  const [specialInstructions, setSpecialInstructions] = useState('');
 
   const emailService = EmailService.getInstance();
 
@@ -58,6 +60,8 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setVerificationStatus('checking');
     setErrorMessage('');
+    setRequiresBridge(false);
+    setSpecialInstructions('');
 
     try {
       const result = await emailService.verifyConnection(
@@ -65,6 +69,13 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
         formData.password,
         formData.provider
       );
+
+      if (result.requiresBridge) {
+        setRequiresBridge(true);
+        setSpecialInstructions(result.specialInstructions || '');
+        setVerificationStatus('error');
+        return;
+      }
 
       if (result.requiresCaptcha && result.captchaUrl) {
         setCaptchaRequired(true);
@@ -174,6 +185,7 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
                 <option value="icloud">iCloud</option>
                 <option value="gmx">GMX</option>
                 <option value="webde">Web.de</option>
+                <option value="protonmail">ProtonMail</option>
               </select>
             </div>
 
@@ -183,7 +195,28 @@ const AddEmailModal: React.FC<AddEmailModalProps> = ({ isOpen, onClose }) => {
               </div>
             )}
 
-            {verificationStatus === 'error' && (
+            {verificationStatus === 'error' && requiresBridge && (
+              <div className="bg-wine-900/20 p-4 rounded-lg border border-wine-700">
+                <div className="flex items-center text-wine-200 mb-2">
+                  <DownloadIcon className="w-5 h-5 mr-2" />
+                  <span>Additional Setup Required</span>
+                </div>
+                <p className="text-sm text-gray-300 mb-3">
+                  {specialInstructions}
+                </p>
+                <a 
+                  href="https://proton.me/mail/bridge"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center px-3 py-2 text-sm bg-wine-600 text-white rounded hover:bg-wine-700 transition-colors"
+                >
+                  <DownloadIcon className="w-4 h-4 mr-2" />
+                  Download ProtonMail Bridge
+                </a>
+              </div>
+            )}
+
+            {verificationStatus === 'error' && !requiresBridge && (
               <div className="bg-red-900/20 p-4 rounded-lg border border-red-700">
                 <div className="flex items-center text-red-400">
                   <AlertTriangleIcon className="w-5 h-5 mr-2" />
